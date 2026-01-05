@@ -1,6 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import gsap from 'gsap'
-import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import './App.css'
 
 const TARGET_CELL_SIZE = 120
@@ -14,6 +13,10 @@ function App() {
   const timeoutsRef = useRef([])
   const prefersReduced = useRef(false)
   const sectionsRef = useRef([])
+  const animationsRef = useRef([])
+  const inTransitionRef = useRef(false)
+  const touchStartY = useRef(0)
+  const touchEndY = useRef(0)
 
   const [grid, setGrid] = useState({
     rows: 0,
@@ -23,9 +26,10 @@ function App() {
   })
   const [hoverKey, setHoverKey] = useState(null)
   const [flashes, setFlashes] = useState({})
-  const [activeSection, setActiveSection] = useState('home')
+  const [currentSectionIndex, setCurrentSectionIndex] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
   const [reduceMotion, setReduceMotion] = useState(false)
+  const [inTransition, setInTransition] = useState(false)
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -52,81 +56,72 @@ function App() {
     return () => window.removeEventListener('resize', updateGrid)
   }, [])
 
-  useEffect(() => {
-    if (!reduceMotion) return
-    const updateActive = () => {
-      const center = window.scrollY + window.innerHeight / 2
-      let current = SECTIONS[0]
-      SECTIONS.forEach((id) => {
-        const el = document.getElementById(id)
-        if (!el) return
-        if (center >= el.offsetTop) {
-          current = id
-        }
-      })
-      setActiveSection(current)
-    }
-
-    updateActive()
-    window.addEventListener('scroll', updateActive, { passive: true })
-    window.addEventListener('resize', updateActive)
-    return () => {
-      window.removeEventListener('scroll', updateActive)
-      window.removeEventListener('resize', updateActive)
-    }
-  }, [reduceMotion])
-
-  const addToRefs = (el) => {
-    if (el && !sectionsRef.current.includes(el)) {
-      sectionsRef.current.push(el)
-    }
+  const setSectionRef = (index, el) => {
+    if (!el) return
+    sectionsRef.current[index] = el
   }
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (reduceMotion) return
 
-    gsap.registerPlugin(ScrollTrigger)
+    animationsRef.current = sectionsRef.current.map((section) => {
+      if (!section) return null
+      const content = section.querySelector('.panel-content') || section
+      const inDown = gsap.timeline({ paused: true })
+      const inUp = gsap.timeline({ paused: true })
+      const outDown = gsap.timeline({ paused: true })
+      const outUp = gsap.timeline({ paused: true })
 
-    sectionsRef.current.forEach((section, index) => {
-      const next = sectionsRef.current[index + 1]
-      const currentContent = section.querySelector('.panel-content')
-      const nextContent = next ? next.querySelector('.panel-content') : null
+      inDown.set(section, { display: 'block' })
+      inDown.fromTo(
+        content,
+        { opacity: 0, y: 100 },
+        { opacity: 1, y: 0, duration: 0.9, ease: 'power2.inOut' },
+      )
 
-        const tl = gsap.timeline({
-          scrollTrigger: {
-            trigger: section,
-            start: 'top top',
-            end: '+=70%',
-            pin: true,
-            scrub: 1,
-            anticipatePin: 1,
-          onEnter: () => {
-            if (currentContent) gsap.set(currentContent, { opacity: 1, y: 0 })
-            setActiveSection(SECTIONS[index])
-          },
-          onEnterBack: () => {
-            if (currentContent) gsap.set(currentContent, { opacity: 1, y: 0 })
-            setActiveSection(SECTIONS[index])
-          },
-        },
-      })
+      inUp.set(section, { display: 'block' })
+      inUp.fromTo(
+        content,
+        { opacity: 0, y: -100 },
+        { opacity: 1, y: 0, duration: 0.9, ease: 'power2.inOut' },
+      )
 
-      if (currentContent) {
-        gsap.set(currentContent, { opacity: 1, y: 0 })
-        tl.to(currentContent, { opacity: 0.6, y: -30, duration: 0.5 })
-      }
-      if (nextContent) {
-        gsap.set(nextContent, { opacity: 0, y: 50 })
-        tl.to(nextContent, { opacity: 1, y: 0, duration: 0.5 }, '<')
+      outDown.to(content, { opacity: 0, y: -80, duration: 0.9, ease: 'power2.inOut' })
+      outDown.set(section, { display: 'none' })
+
+      outUp.to(content, { opacity: 0, y: 80, duration: 0.9, ease: 'power2.inOut' })
+      outUp.set(section, { display: 'none' })
+
+      return {
+        inDown,
+        inUp,
+        outDown,
+        outUp,
       }
     })
 
-    ScrollTrigger.refresh()
-
     return () => {
-      ScrollTrigger.getAll().forEach((trigger) => trigger.kill())
+      animationsRef.current.forEach((entry) => {
+        entry?.inDown?.kill()
+        entry?.inUp?.kill()
+        entry?.outDown?.kill()
+        entry?.outUp?.kill()
+      })
     }
   }, [reduceMotion])
+
+  useEffect(() => {
+    sectionsRef.current.forEach((section, index) => {
+      if (!section) return
+      const content = section.querySelector('.panel-content') || section
+      if (index === currentSectionIndex) {
+        gsap.set(section, { display: 'block' })
+        gsap.set(content, { opacity: 1, y: 0 })
+      } else {
+        gsap.set(section, { display: 'none' })
+      }
+    })
+  }, [currentSectionIndex])
 
   useEffect(() => {
     return () => {
@@ -227,16 +222,115 @@ function App() {
   }
 
   const totalCells = grid.rows * grid.cols
-  const currentIndex = SECTIONS.indexOf(activeSection)
+
+  const playTimeline = (tl) =>
+    new Promise((resolve) => {
+      if (!tl) {
+        resolve()
+        return
+      }
+      tl.eventCallback('onComplete', () => resolve())
+      tl.restart()
+    })
+
+  // Drives section changes: locks input, plays out/in timelines, then commits the index.
+  const setSection = async (index) => {
+    if (index < 0 || index >= SECTIONS.length) return
+    if (index === currentSectionIndex) return
+    if (inTransitionRef.current) return
+
+    inTransitionRef.current = true
+    setInTransition(true)
+
+    if (reduceMotion) {
+      setCurrentSectionIndex(index)
+      inTransitionRef.current = false
+      setInTransition(false)
+      return
+    }
+
+    const direction = index > currentSectionIndex ? 'down' : 'up'
+    const currentAnimations = animationsRef.current[currentSectionIndex]
+    const nextAnimations = animationsRef.current[index]
+    const currentOut = direction === 'down' ? currentAnimations?.outDown : currentAnimations?.outUp
+    const nextIn = direction === 'down' ? nextAnimations?.inDown : nextAnimations?.inUp
+
+    await playTimeline(currentOut)
+    await playTimeline(nextIn)
+
+    setCurrentSectionIndex(index)
+    inTransitionRef.current = false
+    setInTransition(false)
+  }
+
+  useEffect(() => {
+    // Global input interception: one wheel/key/swipe moves exactly one section.
+    const onWheel = (event) => {
+      event.preventDefault()
+      if (menuOpen || inTransitionRef.current) return
+      if (Math.abs(event.deltaY) < 6) return
+      const nextIndex = event.deltaY > 0 ? currentSectionIndex + 1 : currentSectionIndex - 1
+      setSection(nextIndex)
+    }
+
+    const onKeyDown = (event) => {
+      const key = event.key
+      if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'PageDown', 'PageUp', 'Home', 'End'].includes(key)) {
+        return
+      }
+      event.preventDefault()
+      if (menuOpen || inTransitionRef.current) return
+      if (key === 'Home') {
+        setSection(0)
+        return
+      }
+      if (key === 'End') {
+        setSection(SECTIONS.length - 1)
+        return
+      }
+      const isNext = key === 'ArrowDown' || key === 'ArrowRight' || key === 'PageDown'
+      const nextIndex = isNext ? currentSectionIndex + 1 : currentSectionIndex - 1
+      setSection(nextIndex)
+    }
+
+    const onTouchStart = (event) => {
+      if (event.touches.length !== 1) return
+      touchStartY.current = event.touches[0].clientY
+      touchEndY.current = touchStartY.current
+    }
+
+    const onTouchMove = (event) => {
+      event.preventDefault()
+      if (event.touches.length !== 1) return
+      touchEndY.current = event.touches[0].clientY
+    }
+
+    const onTouchEnd = () => {
+      if (menuOpen || inTransitionRef.current) return
+      const delta = touchStartY.current - touchEndY.current
+      if (Math.abs(delta) < 40) return
+      const nextIndex = delta > 0 ? currentSectionIndex + 1 : currentSectionIndex - 1
+      setSection(nextIndex)
+    }
+
+    window.addEventListener('wheel', onWheel, { passive: false })
+    window.addEventListener('keydown', onKeyDown, { passive: false })
+    window.addEventListener('touchstart', onTouchStart, { passive: false })
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('touchend', onTouchEnd, { passive: false })
+
+    return () => {
+      window.removeEventListener('wheel', onWheel)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('touchstart', onTouchStart)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+    }
+  }, [currentSectionIndex, menuOpen])
 
   const scrollToSection = (direction) => {
-    const nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
-    const target = SECTIONS[nextIndex]
-    if (!target) return
-    const el = document.getElementById(target)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
+    const nextIndex = direction === 'up' ? currentSectionIndex - 1 : currentSectionIndex + 1
+    setSection(nextIndex)
   }
 
   return (
@@ -293,10 +387,17 @@ function App() {
 
         {menuOpen && (
           <nav className="menu-panel content-block" aria-label="Sections">
-            {SECTIONS.map((section) => (
-              <a key={section} href={`#${section}`} onClick={() => setMenuOpen(false)}>
+            {SECTIONS.map((section, index) => (
+              <button
+                key={section}
+                type="button"
+                onClick={() => {
+                  setSection(index)
+                  setMenuOpen(false)
+                }}
+              >
                 {section}
-              </a>
+              </button>
             ))}
           </nav>
         )}
@@ -306,7 +407,7 @@ function App() {
             type="button"
             className="section-nav-button"
             onClick={() => scrollToSection('up')}
-            disabled={currentIndex <= 0}
+            disabled={currentSectionIndex <= 0 || inTransition}
             aria-label="Previous section"
           >
             <img src="/assets/up-arrow.PNG" alt="" />
@@ -315,7 +416,7 @@ function App() {
             type="button"
             className="section-nav-button"
             onClick={() => scrollToSection('down')}
-            disabled={currentIndex >= SECTIONS.length - 1}
+            disabled={currentSectionIndex >= SECTIONS.length - 1 || inTransition}
             aria-label="Next section"
           >
             <img src="/assets/down-arrow.PNG" alt="" />
@@ -323,23 +424,23 @@ function App() {
         </div>
 
         <div className="scroll-wrap">
-          <section id="home" className="hero snap-section" ref={addToRefs}>
+          <section id="home" className="hero snap-section" ref={(el) => setSectionRef(0, el)}>
             <div className="section-inner panel-content">
-            <div className="hero-copy content-block">
-              <h1>
-                We're not an
-                <br />
-                agency
-              </h1>
-              <p>We're the architects of the new attention economy.</p>
-            </div>
+              <div className="hero-copy content-block">
+                <h1>
+                  We&apos;re not an
+                  <br />
+                  agency
+                </h1>
+                <p>We&apos;re the architects of the new attention economy.</p>
+              </div>
               <button className="cta content-block" type="button">
                 Build Your Narrative
               </button>
             </div>
           </section>
 
-          <section id="about" className="snap-section info-section info-hero" ref={addToRefs}>
+          <section id="about" className="snap-section info-section info-hero" ref={(el) => setSectionRef(1, el)}>
             <div className="section-inner panel-content">
               <div className="info-pill content-block">SocialTag began as a talent-first agency.</div>
               <div className="info-copy content-block">
@@ -370,29 +471,29 @@ function App() {
             </div>
           </section>
 
-          <section id="brands" className="snap-section info-section" ref={addToRefs}>
+          <section id="brands" className="snap-section info-section" ref={(el) => setSectionRef(2, el)}>
             <div className="section-inner panel-content content-block">
               <h2>Brands</h2>
               <p>Partnering with ambitious brands ready to lead their category.</p>
             </div>
           </section>
 
-          <section id="creators" className="snap-section info-section" ref={addToRefs}>
+          <section id="creators" className="snap-section info-section" ref={(el) => setSectionRef(3, el)}>
             <div className="section-inner panel-content content-block">
               <h2>Creators</h2>
               <p>Curated talent networks, real community pull, and platform-native storytelling.</p>
             </div>
           </section>
 
-          <section id="contact" className="snap-section info-section" ref={addToRefs}>
+          <section id="contact" className="snap-section info-section" ref={(el) => setSectionRef(4, el)}>
             <div className="section-inner panel-content content-block">
               <h2>Contact</h2>
-              <p>Let's build something memorable together.</p>
+              <p>Let&apos;s build something memorable together.</p>
             </div>
           </section>
         </div>
 
-        <div className="section-label content-block">{activeSection}</div>
+        <div className="section-label content-block">{SECTIONS[currentSectionIndex]}</div>
       </div>
     </div>
   )

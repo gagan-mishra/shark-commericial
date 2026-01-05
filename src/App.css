@@ -6,11 +6,19 @@
   --grid-line: rgba(255, 255, 255, 0.12);
 }
 
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 .app {
   min-height: 100vh;
   background: var(--grid-base);
   position: relative;
   overflow-x: hidden;
+  overflow-y: hidden;
 }
 
 .grid {
@@ -48,7 +56,8 @@
 
 .scroll-wrap {
   position: relative;
-  height: auto;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .top-bar {
@@ -120,14 +129,19 @@
   text-transform: capitalize;
 }
 
-.menu-panel a {
+.menu-panel button {
+  background: transparent;
+  border: none;
   color: #ffffff;
   text-decoration: none;
   font-size: 16px;
   letter-spacing: 0.12em;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.menu-panel a:hover {
+.menu-panel button:hover {
   color: var(--accent);
 }
 
@@ -230,8 +244,16 @@
 }
 
 .snap-section {
+  height: 100vh;
   min-height: 100vh;
-  position: relative;
+  position: absolute;
+  inset: 0;
+  display: none;
+  box-sizing: border-box;
+}
+
+.scroll-wrap .snap-section:first-child {
+  display: block;
 }
 
 .info-section {
@@ -356,9 +378,5 @@
 }
 
 .app.reduced .scroll-wrap {
-  height: auto;
-}
-
-.app.reduced .snap-section {
-  position: relative;
+  height: 100vh;
 }
