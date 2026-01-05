@@ -30,6 +30,7 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [reduceMotion, setReduceMotion] = useState(false)
   const [inTransition, setInTransition] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -41,6 +42,10 @@ function App() {
     mq.addEventListener('change', update)
     return () => mq.removeEventListener('change', update)
   }, [])
+
+  const finishPreload = () => {
+    setTimeout(() => setIsLoading(false), 500)
+  }
 
   useEffect(() => {
     const updateGrid = () => {
@@ -235,6 +240,7 @@ function App() {
 
   // Drives section changes: locks input, plays out/in timelines, then commits the index.
   const setSection = async (index) => {
+    if (isLoading) return
     if (index < 0 || index >= SECTIONS.length) return
     if (index === currentSectionIndex) return
     if (inTransitionRef.current) return
@@ -267,7 +273,7 @@ function App() {
     // Global input interception: one wheel/key/swipe moves exactly one section.
     const onWheel = (event) => {
       event.preventDefault()
-      if (menuOpen || inTransitionRef.current) return
+      if (isLoading || menuOpen || inTransitionRef.current) return
       if (Math.abs(event.deltaY) < 6) return
       const nextIndex = event.deltaY > 0 ? currentSectionIndex + 1 : currentSectionIndex - 1
       setSection(nextIndex)
@@ -279,7 +285,7 @@ function App() {
         return
       }
       event.preventDefault()
-      if (menuOpen || inTransitionRef.current) return
+      if (isLoading || menuOpen || inTransitionRef.current) return
       if (key === 'Home') {
         setSection(0)
         return
@@ -306,7 +312,7 @@ function App() {
     }
 
     const onTouchEnd = () => {
-      if (menuOpen || inTransitionRef.current) return
+      if (isLoading || menuOpen || inTransitionRef.current) return
       const delta = touchStartY.current - touchEndY.current
       if (Math.abs(delta) < 40) return
       const nextIndex = delta > 0 ? currentSectionIndex + 1 : currentSectionIndex - 1
@@ -326,7 +332,7 @@ function App() {
       window.removeEventListener('touchmove', onTouchMove)
       window.removeEventListener('touchend', onTouchEnd)
     }
-  }, [currentSectionIndex, menuOpen])
+  }, [currentSectionIndex, isLoading, menuOpen])
 
   const scrollToSection = (direction) => {
     const nextIndex = direction === 'up' ? currentSectionIndex - 1 : currentSectionIndex + 1
@@ -335,11 +341,25 @@ function App() {
 
   return (
     <div
-      className={`app${reduceMotion ? ' reduced' : ''}`}
+      className={`app${reduceMotion ? ' reduced' : ''}${isLoading ? ' loading' : ''}`}
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
       onClick={handleClick}
     >
+      {isLoading && (
+        <div className="preloader" role="status" aria-live="polite">
+          <video
+            className="preloader-media"
+            src="/assets/shark-animated.mp4"
+            autoPlay
+            muted
+            playsInline
+            preload="auto"
+            onEnded={finishPreload}
+            onError={finishPreload}
+          />
+        </div>
+      )}
       <div
         className="grid"
         style={{
@@ -370,11 +390,10 @@ function App() {
       <div className="content">
         <header className="top-bar">
           <div className="brand content-block">
-            <span className="brand-name">social</span>
-            <span className="brand-sub">TAG</span>
+            <img className="brand-logo" src="/assets/shark%20logo.png" alt="Shark logo" />
           </div>
           <button
-            className="menu content-block"
+            className={`menu content-block${menuOpen ? ' open' : ''}`}
             type="button"
             aria-label="Open menu"
             onClick={() => setMenuOpen((prev) => !prev)}
@@ -385,12 +404,21 @@ function App() {
           </button>
         </header>
 
-        {menuOpen && (
-          <nav className="menu-panel content-block" aria-label="Sections">
+        <div
+          className={`menu-overlay${menuOpen ? ' open' : ''}`}
+          onClick={() => setMenuOpen(false)}
+          aria-hidden={!menuOpen}
+        >
+          <nav
+            className={`menu-panel content-block${menuOpen ? ' open' : ''}`}
+            aria-label="Sections"
+            onClick={(event) => event.stopPropagation()}
+          >
             {SECTIONS.map((section, index) => (
               <button
                 key={section}
                 type="button"
+                className={index === currentSectionIndex ? 'active' : ''}
                 onClick={() => {
                   setSection(index)
                   setMenuOpen(false)
@@ -400,7 +428,7 @@ function App() {
               </button>
             ))}
           </nav>
-        )}
+        </div>
 
         <div className="section-nav content-block" aria-label="Section navigation">
           <button
