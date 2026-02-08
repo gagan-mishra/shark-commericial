@@ -73,25 +73,56 @@ function App() {
     }
     update()
     mq.addEventListener('change', update)
-    return () => mq.removeEventListener('change', update)
+
+    // Prevent zoom on double tap for mobile
+    let lastTouchEnd = 0
+    const preventZoom = (e) => {
+      const now = (new Date()).getTime()
+      if (now - lastTouchEnd <= 300) {
+        e.preventDefault()
+      }
+      lastTouchEnd = now
+    }
+    document.addEventListener('touchend', preventZoom, { passive: false })
+
+    return () => {
+      mq.removeEventListener('change', update)
+      document.removeEventListener('touchend', preventZoom)
+    }
   }, [])
 
   const finishPreload = () => {
     setTimeout(() => setIsLoading(false), 500)
   }
 
-  useEffect(() => {
-    const updateGrid = () => {
-      const cols = Math.max(1, Math.ceil(window.innerWidth / TARGET_CELL_SIZE))
-      const rows = Math.max(1, Math.ceil(window.innerHeight / TARGET_CELL_SIZE))
-      const cellWidth = window.innerWidth / cols
-      const cellHeight = window.innerHeight / rows
-      setGrid({ rows, cols, cellWidth, cellHeight })
-    }
+  const updateGrid = () => {
+    const cols = Math.max(1, Math.ceil(window.innerWidth / TARGET_CELL_SIZE))
+    const rows = Math.max(1, Math.ceil(window.innerHeight / TARGET_CELL_SIZE))
+    const cellWidth = window.innerWidth / cols
+    const cellHeight = window.innerHeight / rows
+    setGrid({ rows, cols, cellWidth, cellHeight })
+  }
 
+  useEffect(() => {
     updateGrid()
-    window.addEventListener('resize', updateGrid)
-    return () => window.removeEventListener('resize', updateGrid)
+    
+    // Debounced resize handler for better mobile performance
+    let resizeTimeout
+    const debouncedResize = () => {
+      clearTimeout(resizeTimeout)
+      resizeTimeout = setTimeout(updateGrid, 150)
+    }
+    
+    window.addEventListener('resize', debouncedResize)
+    window.addEventListener('orientationchange', () => {
+      setTimeout(updateGrid, 100) // Delay for orientation change
+    })
+    
+    return () => {
+      window.removeEventListener('resize', debouncedResize)
+      window.removeEventListener('orientationchange', updateGrid)
+      clearTimeout(resizeTimeout)
+    }
   }, [])
 
   const setSectionRef = (index, el) => {
@@ -191,6 +222,16 @@ function App() {
 
   const handlePointerMove = (event) => {
     if (event.target.closest?.('.content-block')) return
+    
+    // Throttle pointer events on mobile for better performance
+    if (window.innerWidth <= 768) {
+      if (!handlePointerMove.lastCall || Date.now() - handlePointerMove.lastCall > 50) {
+        handlePointerMove.lastCall = Date.now()
+      } else {
+        return
+      }
+    }
+    
     const { cols, rows, cellWidth, cellHeight } = grid
     if (!cols || !rows) return
 
@@ -207,6 +248,11 @@ function App() {
 
   const handleClick = (event) => {
     if (event.target.closest?.('.content-block')) return
+    
+    // Reduce animation complexity on mobile devices
+    const isMobile = window.innerWidth <= 768
+    if (isMobile && prefersReduced.current) return
+    
     const { cols, rows, cellWidth, cellHeight } = grid
     if (!cols || !rows) return
 
@@ -222,6 +268,7 @@ function App() {
     const baseColor = pickRandomColor()
     const ringStep = Math.min(cellWidth, cellHeight)
     const waveSpeed = ringStep / RING_BEAT
+    const maxRadius = isMobile ? 3 : 6 // Reduce animation radius on mobile
 
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
@@ -230,6 +277,7 @@ function App() {
         const distance = Math.hypot(centerX - clickX, centerY - clickY)
         const ringIndex = distance / ringStep
         if (prefersReduced.current && ringIndex >= 1) continue
+        if (isMobile && ringIndex >= maxRadius) continue // Limit animation on mobile
         const alpha = Math.max(0.08, 0.65 - ringIndex * 0.06)
         const color = hexToRgba(baseColor, alpha)
         const delay = BASE_DELAY + distance / waveSpeed
@@ -324,20 +372,28 @@ function App() {
 
     const onTouchStart = (event) => {
       if (event.touches.length !== 1) return
+      if (event.target.closest?.('.content-block')) return // Don't interfere with interactive elements
       touchStartY.current = event.touches[0].clientY
       touchEndY.current = touchStartY.current
     }
 
     const onTouchMove = (event) => {
-      event.preventDefault()
       if (event.touches.length !== 1) return
+      if (event.target.closest?.('.content-block')) return
       touchEndY.current = event.touches[0].clientY
+      
+      // Only prevent default for vertical scrolling gestures
+      const delta = Math.abs(touchStartY.current - touchEndY.current)
+      if (delta > 10) {
+        event.preventDefault()
+      }
     }
 
-    const onTouchEnd = () => {
+    const onTouchEnd = (event) => {
+      if (event.target.closest?.('.content-block')) return
       if (isLoading || menuOpen || inTransitionRef.current) return
       const delta = touchStartY.current - touchEndY.current
-      if (Math.abs(delta) < 40) return
+      if (Math.abs(delta) < 50) return // Increased threshold for better mobile UX
       const nextIndex = delta > 0 ? currentSectionIndex + 1 : currentSectionIndex - 1
       setSection(nextIndex)
     }
