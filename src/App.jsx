@@ -30,6 +30,8 @@ function App() {
   const inTransitionRef = useRef(false)
   const touchStartY = useRef(0)
   const touchEndY = useRef(0)
+  const isSectionScrollRef = useRef(false)
+  const scrollSectionRef = useRef(null)
   const galleryCarouselRef = useRef(null)
 
   const [grid, setGrid] = useState({
@@ -185,7 +187,7 @@ function App() {
       const content = section.querySelector('.panel-content') || section
       if (index === currentSectionIndex) {
         gsap.set(section, { display: 'flex' })
-        gsap.set(content, { opacity: 1, y: 0 })
+        gsap.set(content, { opacity: 1, y: 0, clearProps: 'opacity,transform' })
       } else {
         gsap.set(section, { display: 'none' })
       }
@@ -344,9 +346,21 @@ function App() {
 
   useEffect(() => {
     // Global input interception: one wheel/key/swipe moves exactly one section.
+    const canScrollSection = (sectionEl, deltaY) => {
+      if (!sectionEl) return false
+      const { scrollTop, scrollHeight, clientHeight } = sectionEl
+      const maxScroll = scrollHeight - clientHeight
+      if (maxScroll <= 0) return false
+      if (deltaY > 0 && scrollTop < maxScroll) return true
+      if (deltaY < 0 && scrollTop > 0) return true
+      return false
+    }
+
     const onWheel = (event) => {
-      event.preventDefault()
       if (isLoading || menuOpen || inTransitionRef.current) return
+      const scrollSection = event.target.closest?.('.scrollable-section')
+      if (canScrollSection(scrollSection, event.deltaY)) return
+      event.preventDefault()
       if (Math.abs(event.deltaY) < 6) return
       const nextIndex = event.deltaY > 0 ? currentSectionIndex + 1 : currentSectionIndex - 1
       setSection(nextIndex)
@@ -374,6 +388,8 @@ function App() {
 
     const onTouchStart = (event) => {
       if (event.touches.length !== 1) return
+      isSectionScrollRef.current = false
+      scrollSectionRef.current = event.target.closest?.('.scrollable-section') || null
       if (event.target.closest?.('.content-block')) return // Don't interfere with interactive elements
       touchStartY.current = event.touches[0].clientY
       touchEndY.current = touchStartY.current
@@ -381,6 +397,12 @@ function App() {
 
     const onTouchMove = (event) => {
       if (event.touches.length !== 1) return
+      const deltaY = touchEndY.current - event.touches[0].clientY
+      if (canScrollSection(scrollSectionRef.current, deltaY)) {
+        isSectionScrollRef.current = true
+        touchEndY.current = event.touches[0].clientY
+        return
+      }
       if (event.target.closest?.('.content-block')) return
       touchEndY.current = event.touches[0].clientY
 
@@ -394,6 +416,10 @@ function App() {
     const onTouchEnd = (event) => {
       if (event.target.closest?.('.content-block')) return
       if (isLoading || menuOpen || inTransitionRef.current) return
+      if (isSectionScrollRef.current) {
+        isSectionScrollRef.current = false
+        return
+      }
       const delta = touchStartY.current - touchEndY.current
       if (Math.abs(delta) < 50) return // Increased threshold for better mobile UX
       const nextIndex = delta > 0 ? currentSectionIndex + 1 : currentSectionIndex - 1
@@ -548,7 +574,7 @@ function App() {
             <h1 >
               Shark Commercial
             </h1>
-            <p style={{ color: 'orange' }}>
+            <p>
               Creating opportunity for all — by turning attention into leverage.
             </p>
           </section>
@@ -566,17 +592,17 @@ function App() {
 
                 </h1>
               </div>
-              <div className="info-icons content-block">
-                <div className="info-icon" aria-hidden>
+              <div className="info-icons" aria-hidden>
+                <div className="info-icon">
                   <img src="/assets/youtube.png" alt="YouTube" />
                 </div>
-                <div className="info-icon" aria-hidden>
+                <div className="info-icon">
                   <img src="/assets/instagram.png" alt="Instagram" />
                 </div>
-                <div className="info-icon" aria-hidden>
+                <div className="info-icon">
                   <img src="/assets/twitter.png" alt="X" />
                 </div>
-                <div className="info-icon" aria-hidden>
+                <div className="info-icon">
                   <img src="/assets/linkedin.png" alt="LinkedIn" />
                 </div>
               </div>
@@ -721,23 +747,22 @@ function App() {
             </div>
           </section>
 
-          <section id="contact" className="snap-section info-section" ref={(el) => setSectionRef(6, el)}>
+          <section id="contact" className="snap-section info-section scrollable-section" ref={(el) => setSectionRef(6, el)}>
             <div className="section-inner panel-content">
-              <div className="contact-header">
-                <h2 className="contact-title">Contact Us</h2>
-                <p className="contact-subtitle">Get in Touch</p>
-              </div>
-              <div className="contact-content-wrapper">
-                {/* Left Column - Contact Details */}
+              <div className="contact-content-wrapper content-block">
+                {/* Left Column - Get in Touch */}
                 <div className="contact-column contact-details-column">
+                  <div className="contact-header contact-left-header">
+                    <h2 className="contact-title">Get in Touch</h2>
+                  </div>
                   <div className="contact-details-card">
                     <div className="contact-info-item">
-                      <label className="contact-info-label">Office Phone</label>
+                      <label className="contact-info-label">Phone</label>
                       <a href="tel:+919175713150" className="contact-info-value">9175713150</a>
                     </div>
 
                     <div className="contact-info-item">
-                      <label className="contact-info-label">Office Email</label>
+                      <label className="contact-info-label">Email</label>
                       <a href="mailto:tusharpuri101@gmail.com" className="contact-info-value">tusharpuri101@gmail.com</a>
                     </div>
 
@@ -753,7 +778,10 @@ function App() {
 
                 {/* Right Column - Contact Form */}
                 <div className="contact-column contact-form-column">
-                  <form className="contact-form" onClick={(e) => e.stopPropagation()}>
+                  <div className="contact-header contact-right-header">
+                    <h2 className="contact-title">Contact Us</h2>
+                  </div>
+                  <form className="contact-form content-block" onClick={(e) => e.stopPropagation()}>
                     <div className="form-field">
                       <label htmlFor="contactName" className="form-label">Your Name</label>
                       <input type="text" id="contactName" name="contactName" placeholder="Enter your full name" required />
@@ -786,3 +814,4 @@ function App() {
 }
 
 export default App
+
