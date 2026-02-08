@@ -105,19 +105,19 @@ function App() {
 
   useEffect(() => {
     updateGrid()
-    
+
     // Debounced resize handler for better mobile performance
     let resizeTimeout
     const debouncedResize = () => {
       clearTimeout(resizeTimeout)
       resizeTimeout = setTimeout(updateGrid, 150)
     }
-    
+
     window.addEventListener('resize', debouncedResize)
     window.addEventListener('orientationchange', () => {
       setTimeout(updateGrid, 100) // Delay for orientation change
     })
-    
+
     return () => {
       window.removeEventListener('resize', debouncedResize)
       window.removeEventListener('orientationchange', updateGrid)
@@ -221,8 +221,9 @@ function App() {
   const pickRandomColor = () => NEON_COLORS[Math.floor(Math.random() * NEON_COLORS.length)]
 
   const handlePointerMove = (event) => {
-    if (event.target.closest?.('.content-block')) return
-    
+    // Exclude interactive elements and content blocks from grid interactions
+    if (event.target.closest?.('.content-block, form, input, textarea, button, select, a, [role="button"], [onclick]')) return
+
     // Throttle pointer events on mobile for better performance
     if (window.innerWidth <= 768) {
       if (!handlePointerMove.lastCall || Date.now() - handlePointerMove.lastCall > 50) {
@@ -231,7 +232,7 @@ function App() {
         return
       }
     }
-    
+
     const { cols, rows, cellWidth, cellHeight } = grid
     if (!cols || !rows) return
 
@@ -247,12 +248,13 @@ function App() {
   }
 
   const handleClick = (event) => {
-    if (event.target.closest?.('.content-block')) return
-    
+    // Exclude interactive elements and content blocks from grid interactions
+    if (event.target.closest?.('.content-block, form, input, textarea, button, select, a, [role="button"], [onclick]')) return
+
     // Reduce animation complexity on mobile devices
     const isMobile = window.innerWidth <= 768
     if (isMobile && prefersReduced.current) return
-    
+
     const { cols, rows, cellWidth, cellHeight } = grid
     if (!cols || !rows) return
 
@@ -381,7 +383,7 @@ function App() {
       if (event.touches.length !== 1) return
       if (event.target.closest?.('.content-block')) return
       touchEndY.current = event.touches[0].clientY
-      
+
       // Only prevent default for vertical scrolling gestures
       const delta = Math.abs(touchStartY.current - touchEndY.current)
       if (delta > 10) {
@@ -751,7 +753,7 @@ function App() {
 
                 {/* Right Column - Contact Form */}
                 <div className="contact-column contact-form-column">
-                  <form className="contact-form">
+                  <form className="contact-form" onClick={(e) => e.stopPropagation()}>
                     <div className="form-field">
                       <label htmlFor="contactName" className="form-label">Your Name</label>
                       <input type="text" id="contactName" name="contactName" placeholder="Enter your full name" required />
@@ -769,15 +771,6 @@ function App() {
 
                     <button type="submit" className="contact-submit-btn">
                       <span>Send Message</span>
-                      <img
-                        src="/assets/arrow.png"
-                        alt=""
-                        className="arrow-indicator button-arrow"
-                        width="18"
-                        height="18"
-                        loading="eager"
-                        aria-hidden="true"
-                      />
                     </button>
                   </form>
                 </div>
