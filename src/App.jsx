@@ -73,25 +73,56 @@ function App() {
     }
     update()
     mq.addEventListener('change', update)
-    return () => mq.removeEventListener('change', update)
+
+    // Prevent zoom on double tap for mobile
+    let lastTouchEnd = 0
+    const preventZoom = (e) => {
+      const now = (new Date()).getTime()
+      if (now - lastTouchEnd <= 300) {
+        e.preventDefault()
+      }
+      lastTouchEnd = now
+    }
+    document.addEventListener('touchend', preventZoom, { passive: false })
+
+    return () => {
+      mq.removeEventListener('change', update)
+      document.removeEventListener('touchend', preventZoom)
+    }
   }, [])
 
   const finishPreload = () => {
     setTimeout(() => setIsLoading(false), 500)
   }
 
-  useEffect(() => {
-    const updateGrid = () => {
-      const cols = Math.max(1, Math.ceil(window.innerWidth / TARGET_CELL_SIZE))
-      const rows = Math.max(1, Math.ceil(window.innerHeight / TARGET_CELL_SIZE))
-      const cellWidth = window.innerWidth / cols
-      const cellHeight = window.innerHeight / rows
-      setGrid({ rows, cols, cellWidth, cellHeight })
-    }
+  const updateGrid = () => {
+    const cols = Math.max(1, Math.ceil(window.innerWidth / TARGET_CELL_SIZE))
+    const rows = Math.max(1, Math.ceil(window.innerHeight / TARGET_CELL_SIZE))
+    const cellWidth = window.innerWidth / cols
+    const cellHeight = window.innerHeight / rows
+    setGrid({ rows, cols, cellWidth, cellHeight })
+  }
 
+  useEffect(() => {
     updateGrid()
-    window.addEventListener('resize', updateGrid)
-    return () => window.removeEventListener('resize', updateGrid)
+    
+    // Debounced resize handler for better mobile performance
+    let resizeTimeout
+    const debouncedResize = () => {
+      clearTimeout(resizeTimeout)
+      resizeTimeout = setTimeout(updateGrid, 150)
+    }
+    
+    window.addEventListener('resize', debouncedResize)
+    window.addEventListener('orientationchange', () => {
+      setTimeout(updateGrid, 100) // Delay for orientation change
+    })
+    
+    return () => {
+      window.removeEventListener('resize', debouncedResize)
+      window.removeEventListener('orientationchange', updateGrid)
+      clearTimeout(resizeTimeout)
+    }
   }, [])
 
   const setSectionRef = (index, el) => {
@@ -191,6 +222,16 @@ function App() {
 
   const handlePointerMove = (event) => {
     if (event.target.closest?.('.content-block')) return
+    
+    // Throttle pointer events on mobile for better performance
+    if (window.innerWidth <= 768) {
+      if (!handlePointerMove.lastCall || Date.now() - handlePointerMove.lastCall > 50) {
+        handlePointerMove.lastCall = Date.now()
+      } else {
+        return
+      }
+    }
+    
     const { cols, rows, cellWidth, cellHeight } = grid
     if (!cols || !rows) return
 
@@ -207,6 +248,11 @@ function App() {
 
   const handleClick = (event) => {
     if (event.target.closest?.('.content-block')) return
+    
+    // Reduce animation complexity on mobile devices
+    const isMobile = window.innerWidth <= 768
+    if (isMobile && prefersReduced.current) return
+    
     const { cols, rows, cellWidth, cellHeight } = grid
     if (!cols || !rows) return
 
@@ -222,6 +268,7 @@ function App() {
     const baseColor = pickRandomColor()
     const ringStep = Math.min(cellWidth, cellHeight)
     const waveSpeed = ringStep / RING_BEAT
+    const maxRadius = isMobile ? 3 : 6 // Reduce animation radius on mobile
 
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
@@ -230,6 +277,7 @@ function App() {
         const distance = Math.hypot(centerX - clickX, centerY - clickY)
         const ringIndex = distance / ringStep
         if (prefersReduced.current && ringIndex >= 1) continue
+        if (isMobile && ringIndex >= maxRadius) continue // Limit animation on mobile
         const alpha = Math.max(0.08, 0.65 - ringIndex * 0.06)
         const color = hexToRgba(baseColor, alpha)
         const delay = BASE_DELAY + distance / waveSpeed
@@ -324,20 +372,28 @@ function App() {
 
     const onTouchStart = (event) => {
       if (event.touches.length !== 1) return
+      if (event.target.closest?.('.content-block')) return // Don't interfere with interactive elements
       touchStartY.current = event.touches[0].clientY
       touchEndY.current = touchStartY.current
     }
 
     const onTouchMove = (event) => {
-      event.preventDefault()
       if (event.touches.length !== 1) return
+      if (event.target.closest?.('.content-block')) return
       touchEndY.current = event.touches[0].clientY
+      
+      // Only prevent default for vertical scrolling gestures
+      const delta = Math.abs(touchStartY.current - touchEndY.current)
+      if (delta > 10) {
+        event.preventDefault()
+      }
     }
 
-    const onTouchEnd = () => {
+    const onTouchEnd = (event) => {
+      if (event.target.closest?.('.content-block')) return
       if (isLoading || menuOpen || inTransitionRef.current) return
       const delta = touchStartY.current - touchEndY.current
-      if (Math.abs(delta) < 40) return
+      if (Math.abs(delta) < 50) return // Increased threshold for better mobile UX
       const nextIndex = delta > 0 ? currentSectionIndex + 1 : currentSectionIndex - 1
       setSection(nextIndex)
     }
@@ -504,9 +560,9 @@ function App() {
                   <br />
                   Founded in 2020 by Tushar Puri, we bring 6+ years of industry experience with one clear focus
                   <br />
-                   — results that grow your business with creators, companies.                                   
-                 
-                 </h1>
+                  — results that grow your business with creators, companies.
+
+                </h1>
               </div>
               <div className="info-icons content-block">
                 <div className="info-icon" aria-hidden>
@@ -525,25 +581,56 @@ function App() {
             </div>
           </section>
 
-          <section id="services" className="snap-section info-section about-section" ref={(el) => setSectionRef(2, el)}>
-            <div className="section-inner panel-content about-layout">
-              <div className="about-copy content-block">
-                <h2>Our mission is to shape narratives that spark movements.</h2>
-                <p>We believe creators are the new media. And we know how to use that power to grow businesses that matter.</p>
-              </div>
-              <div className="about-card content-block" aria-hidden>
-                <div className="about-card-media">
-                  <div className="about-play">▶</div>
+          <section
+            id="services"
+            className="snap-section info-section services-section"
+            ref={(el) => setSectionRef(2, el)}
+          >
+            <div className="section-inner">
+              <div className="expertise-section">
+
+                <div className="expertise-header">
+                  <h2 className="expertise-title">
+                    Our Expertise
+                  </h2>
                 </div>
-                <div className="about-card-meta">
-                  <div className="about-heart">❤</div>
-                  <span>1.1M</span>
+
+                {/* SERVICES MINIMAL LAYOUT */}
+                <div className="services-container">
+                  {[
+                    {
+                      icon: "📈",
+                      title: "Digital Marketing",
+                      text: "Custom strategies that strengthen brand presence and drive growth"
+                    },
+                    {
+                      icon: "📊",
+                      title: "Performance Marketing",
+                      text: "ROI-driven campaigns engineered for maximum conversions"
+                    },
+                    {
+                      icon: "🎥",
+                      title: "Video Production",
+                      text: "Visually compelling stories that elevate engagement and impact"
+                    },
+                    {
+                      icon: "✍️",
+                      title: "Content Creation",
+                      text: "Strategic content designed to connect and convert effectively"
+                    }
+                  ].map((item, i) => (
+                    <div key={i} className="service-item">
+                      <div className="service-icon">{item.icon}</div>
+                      <h3 className="service-title">{item.title}</h3>
+                      <p className="service-description">{item.text}</p>
+                    </div>
+                  ))}
                 </div>
-                <div className="about-card-title">Reach masses</div>
-                <div className="about-card-tag">#socialtag</div>
+
               </div>
             </div>
           </section>
+
 
           <section id="why" className="snap-section info-section why-section" ref={(el) => setSectionRef(3, el)}>
             <div className="section-inner panel-content">
@@ -601,9 +688,9 @@ function App() {
                   <h2 className="gallery-title">GALLERY</h2>
                   <div className="gallery-next-wrapper">
                     <span className="gallery-next-label">Next</span>
-                    <img 
-                      src="/assets/arrow.png" 
-                      alt="scroll right" 
+                    <img
+                      src="/assets/arrow.png"
+                      alt="scroll right"
                       className="arrow-indicator gallery-arrow"
                       width="24"
                       height="24"
@@ -615,7 +702,7 @@ function App() {
                   <div className="gallery-grid">
                     {TALENT_DATA.map((talent, index) => (
                       <div key={talent.id} className="gallery-tile">
-                        <img 
+                        <img
                           src={`/assets/gallery/${talent.image}`}
                           alt={`${talent.name} - Talent Network`}
                           className="gallery-image"
@@ -637,7 +724,7 @@ function App() {
               <div className="contact-header">
                 <h2 className="contact-title">Contact Us</h2>
                 <p className="contact-subtitle">Get in Touch</p>
-               </div>
+              </div>
               <div className="contact-content-wrapper">
                 {/* Left Column - Contact Details */}
                 <div className="contact-column contact-details-column">
@@ -679,12 +766,12 @@ function App() {
                       <label htmlFor="contactPhone" className="form-label">Phone Number</label>
                       <input type="tel" id="contactPhone" name="contactPhone" placeholder="Enter your phone number" required />
                     </div>
-                  
+
                     <button type="submit" className="contact-submit-btn">
                       <span>Send Message</span>
-                      <img 
-                        src="/assets/arrow.png" 
-                        alt="" 
+                      <img
+                        src="/assets/arrow.png"
+                        alt=""
                         className="arrow-indicator button-arrow"
                         width="18"
                         height="18"
