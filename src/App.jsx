@@ -3,10 +3,9 @@ import gsap from 'gsap'
 import './App.css'
 
 const TARGET_CELL_SIZE = 120
-const BASE_DELAY = 50
-const RING_BEAT = 70
-const FLASH_DURATION = 200
-const NEON_COLORS = ['#00f0ff', '#ff2aa1', '#7cff00', '#ffd400', '#8a2bff', '#ff6b00']
+const PASTEL_COLORS = [
+  '#f94144', '#f3722c', '#f8961e', '#f9844a', '#f9c74f', '#43aa8b', '#577590',
+]
 const SECTIONS = ['home', 'about', 'services', 'why', 'brands', 'gallery', 'contact']
 
 const TALENT_DATA = [
@@ -28,11 +27,13 @@ function App() {
   const sectionsRef = useRef([])
   const animationsRef = useRef([])
   const inTransitionRef = useRef(false)
+  const rippleActiveRef = useRef(false)
   const touchStartY = useRef(0)
   const touchEndY = useRef(0)
   const isSectionScrollRef = useRef(false)
   const scrollSectionRef = useRef(null)
   const galleryCarouselRef = useRef(null)
+  const gridRef = useRef(null)
 
   const [grid, setGrid] = useState({
     rows: 0,
@@ -42,6 +43,7 @@ function App() {
   })
   const [hoverKey, setHoverKey] = useState(null)
   const [flashes, setFlashes] = useState({})
+  const [transitionMs, setTransitionMs] = useState(300)
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
   const [reduceMotion, setReduceMotion] = useState(false)
@@ -211,16 +213,16 @@ function App() {
     timeoutsRef.current = []
   }
 
-  const hexToRgba = (hex, alpha) => {
-    const normalized = hex.replace('#', '')
-    const bigint = parseInt(normalized, 16)
-    const r = (bigint >> 16) & 255
-    const g = (bigint >> 8) & 255
-    const b = bigint & 255
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`
-  }
+const hexToRgba = (hex, alpha) => {
+  const normalized = hex.replace('#', '')
+  const bigint = parseInt(normalized, 16)
+  const r = (bigint >> 16) & 255
+  const g = (bigint >> 8) & 255
+  const b = bigint & 255
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
 
-  const pickRandomColor = () => NEON_COLORS[Math.floor(Math.random() * NEON_COLORS.length)]
+const pickRandomColor = () => PASTEL_COLORS[Math.floor(Math.random() * PASTEL_COLORS.length)]
 
   const handlePointerMove = (event) => {
     // Exclude interactive elements and content blocks from grid interactions
@@ -256,52 +258,68 @@ function App() {
     // Reduce animation complexity on mobile devices
     const isMobile = window.innerWidth <= 768
     if (isMobile && prefersReduced.current) return
+    if (rippleActiveRef.current) return
 
-    const { cols, rows, cellWidth, cellHeight } = grid
+    const { cols, rows } = grid
     if (!cols || !rows) return
+    if (!gridRef.current) return
 
-    const clickX = event.clientX
-    const clickY = event.clientY
-    const col = Math.floor(clickX / cellWidth)
-    const row = Math.floor(clickY / cellHeight)
+    const rect = gridRef.current.getBoundingClientRect()
+    const clickX = event.clientX - rect.left
+    const clickY = event.clientY - rect.top
+    const col = Math.floor(clickX / TARGET_CELL_SIZE)
+    const row = Math.floor(clickY / TARGET_CELL_SIZE)
     if (col < 0 || row < 0 || col >= cols || row >= rows) return
+    const originX = (col + 0.5) * TARGET_CELL_SIZE
+    const originY = (row + 0.5) * TARGET_CELL_SIZE
 
     clearTimers()
     setFlashes({})
 
     const baseColor = pickRandomColor()
-    const ringStep = Math.min(cellWidth, cellHeight)
-    const waveSpeed = ringStep / RING_BEAT
-    const maxRadius = isMobile ? 3 : 6 // Reduce animation radius on mobile
+    const maxDistance = Math.hypot(cols * TARGET_CELL_SIZE, rows * TARGET_CELL_SIZE)
+    const waveSpeed = TARGET_CELL_SIZE / 60
+    const bandWidth = TARGET_CELL_SIZE * 4
+    const bandDuration = bandWidth / waveSpeed
+    const totalDuration = maxDistance / waveSpeed + bandDuration + 200
+    setTransitionMs(bandDuration / 2)
+    rippleActiveRef.current = true
+    schedule(() => {
+      rippleActiveRef.current = false
+    }, totalDuration)
 
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
-        const centerX = (c + 0.5) * cellWidth
-        const centerY = (r + 0.5) * cellHeight
-        const distance = Math.hypot(centerX - clickX, centerY - clickY)
-        const ringIndex = distance / ringStep
-        if (prefersReduced.current && ringIndex >= 1) continue
-        if (isMobile && ringIndex >= maxRadius) continue // Limit animation on mobile
-        const alpha = Math.max(0.08, 0.65 - ringIndex * 0.06)
-        const color = hexToRgba(baseColor, alpha)
-        const delay = BASE_DELAY + distance / waveSpeed
+        const centerX = (c + 0.5) * TARGET_CELL_SIZE
+        const centerY = (r + 0.5) * TARGET_CELL_SIZE
+        const distance = Math.hypot(centerX - originX, centerY - originY)
+        const ratio = distance / maxDistance
+        const ringAlpha = Math.max(0, Math.sin(Math.PI * ratio))
+        const flashFactor = 1 + ringAlpha * 0.4
+        const color = hexToRgba(baseColor, 1)
+        const startDelay = distance / waveSpeed - bandDuration / 2
+        const endDelay = distance / waveSpeed + bandDuration / 2
         const key = `${r}-${c}`
 
         schedule(() => {
-          setFlashes((prev) => ({ ...prev, [key]: color }))
-          schedule(() => {
-            setFlashes((prev) => {
-              const next = { ...prev }
-              delete next[key]
-              return next
-            })
-          }, FLASH_DURATION)
-        }, delay)
+          setFlashes((prev) => ({ ...prev, [key]: { color, flashFactor } }))
+        }, Math.max(0, startDelay))
+
+        schedule(() => {
+          setFlashes((prev) => {
+            const next = { ...prev }
+            delete next[key]
+            return next
+          })
+        }, Math.max(0, endDelay))
       }
     }
   }
 
   const totalCells = grid.rows * grid.cols
+  const gridCenterX = (grid.cols * TARGET_CELL_SIZE) / 2
+  const gridCenterY = (grid.rows * TARGET_CELL_SIZE) / 2
+  const maxCenterDist = Math.hypot(gridCenterX, gridCenterY)
 
   const playTimeline = (tl) =>
     new Promise((resolve) => {
@@ -462,7 +480,6 @@ function App() {
       className={`app${reduceMotion ? ' reduced' : ''}${isLoading ? ' loading' : ''}`}
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
-      onClick={handleClick}
     >
       {isLoading && (
         <div className="preloader" role="status" aria-live="polite">
@@ -480,6 +497,8 @@ function App() {
       )}
       <div
         className="grid"
+        ref={gridRef}
+        onClick={handleClick}
         style={{
           gridTemplateColumns: `repeat(${grid.cols}, 1fr)`,
           gridTemplateRows: `repeat(${grid.rows}, 1fr)`,
@@ -490,16 +509,34 @@ function App() {
           const row = Math.floor(index / grid.cols)
           const col = index % grid.cols
           const key = `${row}-${col}`
-          const isHover = hoverKey === key
-          const flashColor = flashes[key]
-          const isFlashing = Boolean(flashColor)
-          const cellClass = `cell${isHover ? ' hover' : ''}${isFlashing ? ' flash' : ''}`
+          const flash = flashes[key]
+          const isFlashing = Boolean(flash)
+          const cellClass = `cell${isFlashing ? ' flash' : ''}`
+          const cellX = (col + 0.5) * TARGET_CELL_SIZE
+          const cellY = (row + 0.5) * TARGET_CELL_SIZE
+          const distToCenter = Math.hypot(cellX - gridCenterX, cellY - gridCenterY)
+          const idleBrightness = 0.35 + (1 - distToCenter / maxCenterDist) * 0.65
+          const currentBrightness = flash ? idleBrightness * flash.flashFactor : idleBrightness
+          const cellColor = flash ? flash.color : 'var(--base-dark)'
 
           return (
             <div
               key={key}
               className={cellClass}
-              style={flashColor ? { '--flash-color': flashColor } : undefined}
+              style={
+                flash
+                  ? {
+                      '--flash-color': flash.color,
+                      '--brightness': currentBrightness,
+                      transitionDuration: `${transitionMs}ms`,
+                      backgroundColor: cellColor,
+                    }
+                  : {
+                      '--brightness': currentBrightness,
+                      transitionDuration: `${transitionMs}ms`,
+                      backgroundColor: cellColor,
+                    }
+              }
             />
           )
         })}
